@@ -1,8 +1,8 @@
-name: Auto Twitch Scraper
+name: Multi-Platform Scraper
 on:
   schedule:
-    - cron: '0 */6 * * *' # 每6小时运行一次
-  workflow_dispatch:     # 允许手动触发
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   scrape:
@@ -13,10 +13,11 @@ jobs:
         with:
           python-version: '3.9'
       - run: pip install requests
-      - name: Run Script
+      - name: Run Multi Scraper
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}  # 新增这一行
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: python main.py
