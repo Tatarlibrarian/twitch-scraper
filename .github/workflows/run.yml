@@ -1,14 +1,15 @@
-name: Deep Scraper with Deduplication
+name: GTA Scraper with History Sync
+
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *' # 每 6 小时运行一次
+  workflow_dispatch:      # 允许手动测试
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # --- 必须开启，允许 Action 修改你的仓库文件 ---
+      contents: write     # --- 关键：允许脚本修改并提交仓库文件 ---
     steps:
       - uses: actions/checkout@v3
         with:
@@ -17,9 +18,10 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+      
       - run: pip install requests
 
-      - name: Run Script
+      - name: Run Deep Scraper
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
@@ -30,10 +32,10 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: python main.py
 
-      - name: Commit and push changes
+      - name: Auto-commit history changes
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.name "GitHub Action Bot"
           git add history.txt || true
-          git commit -m "Update history: $(date)" || echo "No changes to commit"
+          git commit -m "自动更新博主历史记录: $(date)" || echo "没有新发现，无需更新历史"
           git push
