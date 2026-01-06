@@ -1,0 +1,28 @@
+name: 2-Enrich-Task
+on:
+  workflow_dispatch: # 只有你手动点击才运行
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - run: pip install requests
+      - name: Run enricher
+        env:
+          GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }}
+          GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: python enricher.py
+      - name: Commit
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Bot"
+          git add leads.csv
+          git commit -m "update contacts" || echo "none"
+          git push
