@@ -1,28 +1,41 @@
-name: 2-Enrich-Task
+name: 2-Find-Contact-Task
+
 on:
   workflow_dispatch: # 只有你手动点击才运行
+
 jobs:
   enrich:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 允许脚本将搜到的联系方式写回 CSV
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+
       - run: pip install requests
-      - name: Run enricher
+
+      - name: Run Enricher
         env:
+          # --- 新增的 API 权限，用于直接读取简介 ---
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          
+          # --- 现有的搜索和邮件权限 ---
           GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }}
           GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: python enricher.py
-      - name: Commit
+
+      - name: Sync CSV Changes
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "Bot"
+          git config --local user.name "GitHub Action Bot"
           git add leads.csv
-          git commit -m "update contacts" || echo "none"
+          # 如果没有变化则不报错
+          git commit -m "Enrich: 自动补充联系方式数据" || echo "No changes to commit"
           git push
