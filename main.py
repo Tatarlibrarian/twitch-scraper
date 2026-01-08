@@ -1,89 +1,111 @@
-import os, requests, csv, re
-from datetime import datetime
+import os, requests, csv, re, smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-# 配置
+# 配置读取
 TWITCH_ID = os.environ.get('TWITCH_CLIENT_ID')
 TWITCH_SECRET = os.environ.get('TWITCH_CLIENT_SECRET')
 YT_API_KEY = os.environ.get('YOUTUBE_API_KEY')
+GOOGLE_KEY = os.environ.get('GOOGLE_SEARCH_KEY')
+GOOGLE_CX = os.environ.get('GOOGLE_SEARCH_CX')
+EMAIL_ADDR = os.environ.get('EMAIL_ADDRESS')
+EMAIL_PASS = os.environ.get('EMAIL_PASSWORD')
 CSV_FILE = "leads.csv"
 
-# 更新后的游戏库（共 16 款）
-GAMES = {
-    # 原有 11 款
-    "GTA V": {"tw_id": "32982", "yt_q": "Grand Theft Auto V"},
-    "Warzone": {"tw_id": "512710", "yt_q": "Call of Duty: Warzone"},
-    "TFT": {"tw_id": "513143", "yt_q": "Teamfight Tactics"},
-    "Tarkov": {"tw_id": "491931", "yt_q": "Escape from Tarkov"},
-    "BlazBlue": {"tw_id": "499507", "yt_q": "BlazBlue: Cross Tag Battle"},
-    "Path of Exile": {"tw_id": "29307", "yt_q": "Path of Exile"},
-    "Project Zomboid": {"tw_id": "31331", "yt_q": "Project Zomboid"},
-    "CS2": {"tw_id": "32399", "yt_q": "Counter-Strike 2"},
-    "Warframe": {"tw_id": "66170", "yt_q": "Warframe"},
-    "Minecraft": {"tw_id": "27471", "yt_q": "Minecraft"},
-    "Fortnite": {"tw_id": "33214", "yt_q": "Fortnite"},
-    # 新增 5 款
-    "League of Legends": {"tw_id": "21779", "yt_q": "League of Legends"},
-    "World of Warcraft": {"tw_id": "18122", "yt_q": "World of Warcraft"},
-    "ARC Raiders": {"tw_id": "464339927", "yt_q": "ARC Raiders"},
-    "EFT Arena": {"tw_id": "104523932", "yt_q": "Escape from Tarkov: Arena"},
-    "VALORANT": {"tw_id": "516575", "yt_q": "VALORANT"}
-}
-
-def load_processed_ids():
-    if not os.path.exists(CSV_FILE): return set()
-    with open(CSV_FILE, "r", encoding='utf-8') as f:
-        return {row["ID"] for row in csv.DictReader(f) if row.get("ID")}
-
-def is_yt_chat_lonely(chat_id):
-    if not chat_id: return True
-    url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId={chat_id}&part=snippet&maxResults=15&key={YT_API_KEY}"
-    try:
-        messages = requests.get(url).json().get('items', [])
-        if not messages: return True
-        interactions = sum(1 for m in messages if '@' in m['snippet'].get('displayMessage', ''))
-        return (interactions / len(messages)) < 0.1
-    except: return True
-
-def get_twitch_results(history):
+def get_twitch_bio(user_id):
+    """直接从 Twitch API 获取简介"""
     auth = requests.post("https://id.twitch.tv/oauth2/token", data={"client_id": TWITCH_ID, "client_secret": TWITCH_SECRET, "grant_type": "client_credentials"}).json()
     token = auth.get('access_token')
     headers = {"Client-ID": TWITCH_ID, "Authorization": f"Bearer {token}"}
-    rows = []
-    for g_name, g_info in GAMES.items():
-        try:
-            streams = requests.get(f"https://api.twitch.tv/helix/streams?game_id={g_info['tw_id']}&language=en&first=30", headers=headers).json().get('data', [])
-            for s in streams:
-                uid = f"tw_{s['user_id']}"
-                if uid not in history and 50 <= s['viewer_count'] <= 200:
-                    rows.append([uid, s['user_name'], "Twitch", g_name, f"https://www.twitch.tv/{s['user_login']}", "New", "", datetime.now().strftime("%Y-%m-%d")])
-        except: continue
-    return rows
+    clean_id = user_id.replace('tw_', '')
+    try:
+        res = requests.get(f"https://api.twitch.tv/helix/users?id={clean_id}", headers=headers).json()
+        return res['data'][0].get('description', '') if res.get('data') else ""
+    except: return ""
 
-def get_youtube_results(history):
-    rows = []
-    for g_name, g_info in GAMES.items():
-        try:
-            # 这里的搜索增加了容错处理
-            vids_res = requests.get(f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={g_info['yt_q']}&type=video&eventType=live&key={YT_API_KEY}&maxResults=15").json()
-            items = vids_res.get('items', [])
+def get_youtube_bio(channel_id):
+    """直接从 YouTube API 获取简介"""
+    clean_id = channel_id.replace('yt_', '')
+    url = f"https://www.googleapis.com/youtube/v3/channels?part=snippet&id={clean_id}&key={YT_API_KEY}"
+    try:
+        res = requests.get(url).json()
+        return res['items'][0]['snippet'].get('description', '') if res.get('items') else ""
+    except: return ""
+
+def extract_email(text):
+    """从文本中提取邮箱"""
+    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+    return emails[0] if emails else None
+
+def find_contact_via_google(name):
+    """保底：通过谷歌搜索提取摘要"""
+    url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_KEY}&cx={GOOGLE_CX}&q={name}+business+email+contact&num=3"
+    try:
+        items = requests.get(url).json().get('items', [])
+        all_text = " ".join([i.get('snippet', '') for i in items])
+        # 优先找邮箱
+        email = extract_email(all_text)
+        if email: return f"📧 Email (Found via Google): {email}"
+        # 次选 Twitter
+        twitter = re.search(r'twitter\.com/([a-zA-Z0-9_]+)', all_text)
+        if twitter: return f"🐦 Twitter: @{twitter.group(1)}"
+    except: pass
+    return None
+
+def enrich_leads():
+    updated_rows = []
+    report = [] # 存储有联系方式的结果
+    with open(CSV_FILE, "r", encoding='utf-8') as f:
+        reader = list(csv.DictReader(f))
+    
+    for row in reader:
+        if row["Status"] == "New":
+            print(f"正在调查: {row['Name']}...")
+            contact = None
             
-            # 安全提取 videoId，防止 KeyError
-            video_ids = [item.get('id', {}).get('videoId') for item in items if item.get('id', {}).get('videoId')]
+            # 1. 优先尝试直接从简介中获取
+            bio = get_twitch_bio(row["ID"]) if row["Platform"] == "Twitch" else get_youtube_bio(row["ID"])
+            found_email = extract_email(bio)
+            if found_email:
+                contact = f"📧 Email (Found in Bio): {found_email}"
             
-            if not video_ids: continue
-            details = requests.get(f"https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails,snippet&id={','.join(video_ids)}&key={YT_API_KEY}").json().get('items', [])
-            for d in details:
-                cid = f"yt_{d['snippet']['channelId']}"
-                viewers = int(d.get('liveStreamingDetails', {}).get('concurrentViewers', 0))
-                if cid not in history and 50 <= viewers <= 200:
-                    if is_yt_chat_lonely(d.get('liveStreamingDetails', {}).get('activeLiveChatId')):
-                        rows.append([cid, d['snippet']['channelTitle'], "YouTube", g_name, f"https://www.youtube.com/watch?v={d['id']}", "New", "", datetime.now().strftime("%Y-%m-%d")])
-        except: continue
-    return rows
+            # 2. 如果简介里没有，再用 Google 搜索
+            if not contact:
+                contact = find_contact_via_google(row['Name'])
+            
+            # 3. 记录结果
+            row["Contact"] = contact if contact else "⚠️ 未发现公开联系方式"
+            row["Status"] = "Enriched"
+            
+            # --- 关键改动：只有当 contact 不为 None 时才加入邮件列表 ---
+            if contact:
+                report.append(f"👤 {row['Name']} ({row['Game']})\n   联系方式: {contact}\n   链接: {row['Link']}")
+        
+        updated_rows.append(row)
+
+    # 保存更新后的 CSV
+    with open(CSV_FILE, "w", newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=reader[0].keys())
+        writer.writeheader()
+        writer.writerows(updated_rows)
+
+    # 只有当发现有联系方式的博主时才发邮件
+    if report:
+        send_mail("\n\n" + "\n\n".join(report))
+        print(f"调查完成，已向邮箱发送了 {len(report)} 条有效线索。")
+    else:
+        print("调查完成，但本次未发现任何公开联系方式。")
+
+def send_mail(body):
+    msg = MIMEMultipart()
+    count = body.count('👤')
+    msg['Subject'] = f"【深度线索】已找齐 {count} 位博主的有效联系方式"
+    msg['From'] = msg['To'] = EMAIL_ADDR
+    msg.attach(MIMEText(body, 'plain'))
+    with smtplib.SMTP("smtp.gmail.com", 587) as s:
+        s.starttls()
+        s.login(EMAIL_ADDR, EMAIL_PASS)
+        s.send_message(msg)
 
 if __name__ == "__main__":
-    processed = load_processed_ids()
-    all_new = get_twitch_results(processed) + get_youtube_results(processed)
-    with open(CSV_FILE, "a", newline='', encoding='utf-8') as f:
-        csv.writer(f).writerows(all_new)
-    print(f"成功更新！本次采集了 {len(all_new)} 个新潜在博主。")
+    enrich_leads()
