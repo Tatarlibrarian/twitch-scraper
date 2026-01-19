@@ -13,7 +13,7 @@ EMAIL_PASS = os.environ.get('EMAIL_PASSWORD')
 CSV_FILE = "leads.csv"
 
 # --- 2. 挖掘配额控制 ---
-MAX_LIMIT = 500  # 每次运行最多处理 50 个新博主，防止耗尽 Google 100次/天的免费配额
+MAX_LIMIT = 500  # 每次运行最多处理 500 个新博主，防止耗尽 Google 100次/天的免费配额
 
 def get_twitch_bio(user_id):
     """直接从 Twitch API 获取博主最新的简介"""
