@@ -1,7 +1,5 @@
 name: 1-Scrape-Task
 on:
-  schedule:
-    - cron: '0 */8 * * *'
   workflow_dispatch:
 jobs:
   scrape:
